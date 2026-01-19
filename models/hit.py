@@ -200,16 +200,16 @@ class HitManager:
     def _set_hit_attrs_new_url(self, hit):
         hit.action_params = lib_hit.get_url_params_from_action_new_url(hit.action_name)
 
-        hit.pid = hit.action_params['pid']
-        hit.acronym = hit.action_params['acronym'].lower()
-        hit.format = hit.action_params['format'].lower()
-        hit.lang = hit.action_params['lang'].lower()
+        hit.pid = hit.action_params.get('pid', '')
+        hit.acronym = hit.action_params.get('acronym', '').lower()
+        hit.format = hit.action_params.get('format', '').lower()
+        hit.lang = hit.action_params.get('lang', '').lower()
 
-        if hit.action_params['resource_ssm_path']:
-            hit.action_params.update(lib_hit.get_attrs_from_ssm_path(hit.action_params['resource_ssm_path']))
-            hit.issn = hit.action_params['issn'].upper()
-            hit.format = hit.action_params['format'].lower()
-            hit.pid = hit.action_params['pid']
+        if hit.action_params.get('resource_ssm_path'):
+            hit.action_params.update(lib_hit.get_attrs_from_ssm_path(hit.action_params.get('resource_ssm_path', '')))
+            hit.issn = hit.action_params.get('issn', '').upper()
+            hit.format = hit.action_params.get('format', '').lower()
+            hit.pid = hit.action_params.get('pid', '')
 
         if not hit.has_valid_format():
             hit.valid = False
@@ -292,9 +292,9 @@ class HitManager:
     def _set_hit_attrs_ssp_url(self, hit):
         hit.action_params = lib_hit.get_url_params_from_action_ssp_url(hit.action_name)
 
-        hit.acronym = hit.action_params['acronym'].lower()
-        hit.format = hit.action_params['format'].lower()
-        hit.lang = hit.action_params['lang'].lower()
+        hit.acronym = hit.action_params.get('acronym', '').lower()
+        hit.format = hit.action_params.get('format', '').lower()
+        hit.lang = hit.action_params.get('lang', '').lower()
         hit.content_type = lib_hit.get_content_type_ssp_url(hit)
         hit.hit_type = lib_hit.get_hit_type_ssp(hit.action_name.lower())
 
