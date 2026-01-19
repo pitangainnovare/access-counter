@@ -236,7 +236,11 @@ def update_issn_map(r5_metrics, issn_map):
     """
     new_issns = set()
     for r in r5_metrics:
-        issn = re.match(REGEX_ISSN, r.issn).string
+        m = re.match(REGEX_ISSN, r.issn or "")
+        if not m:
+            continue
+
+        issn = m.string
         if issn and issn not in issn_map:
             issn_map[issn] = issn
             new_issns.add(issn)
@@ -492,6 +496,10 @@ def _aggregate_by_keylist(r5_metrics, key_list, maps):
     aggregated_metrics = {}
 
     for r in r5_metrics:
+        if r.issn == "" or r.issn not in maps["issn"]:
+            logging.warning("ISSN vazio em %s", r)
+            continue
+
         attrs = {'collection': COLLECTION,
                  'idjournal_cjm': maps['issn'][r.issn],
                  'idjournal_sjm': maps['issn'][r.issn],
