@@ -5,6 +5,7 @@ import logging
 import os
 import re
 import time
+import unicodedata
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -56,7 +57,7 @@ class R5Metrics:
         self.collection = COLLECTION
         self.pid = kargs['pid']
         self.format_name = kargs['format_name']
-        self.language_name = kargs['language_name'] if kargs['language_name'] else 'und'
+        self.language_name = self.standardize_language(kargs['language_name'] if kargs['language_name'] else 'und')
         self.latitude = round(Decimal(kargs['latitude']), 3) if kargs['latitude'] != 'NULL' else kargs['latitude']
         self.longitude = round(Decimal(kargs['longitude']), 3) if kargs['longitude'] != 'NULL' else kargs['longitude']
         self.year_of_publication = int(kargs['year_of_publication']) if kargs['year_of_publication'].isdigit() else kargs['year_of_publication']
@@ -66,6 +67,14 @@ class R5Metrics:
         self.total_item_requests = int(kargs['total_item_requests'])
         self.unique_item_investigations = int(kargs['unique_item_investigations'])
         self.unique_item_requests = int(kargs['unique_item_requests'])
+
+    def standardize_language(self, language):
+        if not language or len(language) < 2:
+            return "und"
+
+        s = unicodedata.normalize("NFKD", language.lower())
+        s = "".join(c for c in s if c.isascii())
+        return s if s == "und" else s[:2]
 
     def is_valid_metric(self):
         # Ignora métrica que latitude é nula
