@@ -506,7 +506,7 @@ def _aggregate_by_keylist(r5_metrics, key_list, maps):
 
     for r in r5_metrics:
         if r.issn == "" or r.issn not in maps["issn"]:
-            logging.warning("ISSN vazio em %s", r)
+            logging.warning("ISSN vazio ou não encontrado no mapa em %s", r)
             continue
 
         attrs = {'collection': COLLECTION,
