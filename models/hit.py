@@ -205,8 +205,9 @@ class HitManager:
         hit.format = hit.action_params.get('format', '').lower()
         hit.lang = hit.action_params.get('lang', '').lower()
 
-        if hit.action_params.get('resource_ssm_path'):
-            hit.action_params.update(lib_hit.get_attrs_from_ssm_path(hit.action_params.get('resource_ssm_path', '')))
+        resource_ssm_path = hit.action_params.get('resource_ssm_path')
+        if resource_ssm_path:
+            hit.action_params.update(lib_hit.get_attrs_from_ssm_path(resource_ssm_path))
             hit.issn = hit.action_params.get('issn', '').upper()
             hit.format = hit.action_params.get('format', '').lower()
             hit.pid = hit.action_params.get('pid', '')
