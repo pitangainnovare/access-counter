@@ -10,7 +10,6 @@ from models.declarative import ArticleMetricCountry
 
 
 STR_CONNECTION = os.environ.get('STR_CONNECTION', 'mysql://user:pass@localhost:3306/matomo')
-COLLECTION = os.environ.get('COLLECTION', 'scl')
 LOGGING_LEVEL = os.environ.get('LOGGING_LEVEL', 'INFO')
 UNKNOWN_COUNTRY_CODE = os.environ.get('UNKNOWN_COUNTRY_CODE', 'ZZ').upper()
 if len(UNKNOWN_COUNTRY_CODE) != 2:
@@ -151,8 +150,8 @@ def main():
 
     parser.add_argument(
         '-c', '--collection',
-        default=COLLECTION,
-        help='Acrônimo da coleção. Use vazio para processar todas as coleções'
+        default='',
+        help='Acrônimo da coleção. Omitir este argumento processa todas as coleções'
     )
 
     parser.add_argument(
