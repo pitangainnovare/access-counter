@@ -131,3 +131,4 @@ No desenho atual, `aggregate` popula as tabelas `aggr_*` incrementalmente a part
 - PRETABLE_DAYS_N
 - COMPUTING_DAYS_N
 - COMPUTING_TIMEDELTA
+- NO_LOG_WAIT_DAYS

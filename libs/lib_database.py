@@ -1,5 +1,6 @@
 import datetime
 import logging
+import os
 
 from libs import lib_status
 from sqlalchemy import create_engine, and_, or_
@@ -17,11 +18,16 @@ from models.declarative import (
     ArticleFormat,
     Localization,
     JournalCollection,
+    LogFile,
     DateStatus,
     AggrStatus,
     AggrJournalGeolocationYearMonthMetric,
     AggrJournalGeolocationYOPYearMonthMetric,
 )
+
+
+NO_LOG_WAIT_DAYS = int(os.environ.get('NO_LOG_WAIT_DAYS', '5'))
+LOG_FILE_STATUS_INVALID = -9
 
 
 def ensure_tables(matomo_db_uri):
@@ -489,12 +495,23 @@ def get_dates_able_to_extract(db_session, collection, number_of_days):
     dates = []
 
     try:
+        reconcile_dates_without_logs(db_session, collection)
+
         ds_results = db_session.query(DateStatus).filter(and_(DateStatus.collection == collection,
-                                                              DateStatus.status >= lib_status.DATE_STATUS_LOADED)).order_by(DateStatus.date.desc())
+                                                              or_(DateStatus.status >= lib_status.DATE_STATUS_LOADED,
+                                                                  DateStatus.status == lib_status.DATE_STATUS_NO_LOG))).order_by(DateStatus.date.desc())
 
         date_to_status = {}
         for r in ds_results:
             date_to_status[r.date] = r.status
+
+        allowed_neighbor_statuses = {
+            lib_status.DATE_STATUS_LOADED,
+            lib_status.DATE_STATUS_PRETABLE,
+            lib_status.DATE_STATUS_COMPUTED,
+            lib_status.DATE_STATUS_COMPLETED,
+            lib_status.DATE_STATUS_NO_LOG,
+        }
 
         days_counter = 0
         for date, status in date_to_status.items():
@@ -504,7 +521,7 @@ def get_dates_able_to_extract(db_session, collection, number_of_days):
 
             is_valid_for_extracting = True
             for ad in arround_days:
-                if ad not in date_to_status:
+                if ad not in date_to_status or date_to_status[ad] not in allowed_neighbor_statuses:
                     is_valid_for_extracting = False
                     break
 
@@ -524,3 +541,69 @@ def get_dates_able_to_extract(db_session, collection, number_of_days):
         dates = []
 
     return sorted(dates, reverse=True)
+
+
+def reconcile_dates_without_logs(db_session, collection, now=None, wait_days=NO_LOG_WAIT_DAYS):
+    if now is None:
+        now = datetime.datetime.now()
+
+    cutoff_date = (now - datetime.timedelta(days=wait_days)).date()
+    changed = False
+
+    try:
+        date_statuses = db_session.query(DateStatus).filter(DateStatus.collection == collection).all()
+        existing_dates = {date_status.date for date_status in date_statuses}
+        all_log_dates = {
+            row[0] for row in db_session.query(LogFile.date).filter(and_(LogFile.collection == collection,
+                                                                         LogFile.date.isnot(None))).all()
+        }
+        valid_or_pending_log_dates = {
+            row[0] for row in db_session.query(LogFile.date).filter(and_(LogFile.collection == collection,
+                                                                         LogFile.date.isnot(None),
+                                                                         LogFile.status != LOG_FILE_STATUS_INVALID)).all()
+        }
+
+        reference_dates = sorted(existing_dates.union(all_log_dates))
+
+        if reference_dates:
+            current_date = reference_dates[0]
+            last_reference_date = min(reference_dates[-1], now.date())
+
+            while current_date <= last_reference_date:
+                if current_date not in existing_dates:
+                    new_date_status = DateStatus()
+                    new_date_status.collection = collection
+                    new_date_status.date = current_date
+                    new_date_status.status = lib_status.DATE_STATUS_QUEUE
+
+                    if current_date <= cutoff_date and current_date not in valid_or_pending_log_dates:
+                        new_date_status.status = lib_status.DATE_STATUS_NO_LOG
+
+                    logging.info('Creating control_date_status row for date=%s with status=%s',
+                                 current_date,
+                                 new_date_status.status)
+                    db_session.add(new_date_status)
+                    date_statuses.append(new_date_status)
+                    existing_dates.add(current_date)
+                    changed = True
+
+                current_date += datetime.timedelta(days=1)
+
+        for date_status in date_statuses:
+            current_status = date_status.status
+            has_valid_or_pending_log = date_status.date in valid_or_pending_log_dates
+
+            if current_status == lib_status.DATE_STATUS_QUEUE and not has_valid_or_pending_log and date_status.date <= cutoff_date:
+                logging.info('Changing status of control_date_status.date=%s from %s to %s after waiting %s day(s) without logs',
+                             date_status.date,
+                             current_status,
+                             lib_status.DATE_STATUS_NO_LOG,
+                             wait_days)
+                date_status.status = lib_status.DATE_STATUS_NO_LOG
+                changed = True
+
+        if changed:
+            db_session.commit()
+
+    except OperationalError:
+        logging.error('Error while trying to reconcile date status with control_log_file')
