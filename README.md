@@ -41,6 +41,24 @@ __Popular tabela de periódicos__
 populate_journals -u STRING_CONNECTION
 ```
 
+__Popular tabela de países por localização__
+
+```bash
+populate_localization_country -u STRING_CONNECTION --batch_size 5000
+```
+
+__Popular tabela de métricas de artigo por país para um dia__
+
+```bash
+populate_article_metric_country -u STRING_CONNECTION -d YYYY-MM-DD -c COLLECTION_ACRONYM
+```
+
+__Validar a tabela de métricas de artigo por país para um dia__
+
+```bash
+validate_article_metric_country -u STRING_CONNECTION -d YYYY-MM-DD -c COLLECTION_ACRONYM
+```
+
 
 __Calcular métricas COUNTER__
 

@@ -1,5 +1,5 @@
 from sqlalchemy import Column, ForeignKey, Integer, UniqueConstraint, Index, Date, DECIMAL
-from sqlalchemy.dialects.mysql import BIGINT,  BOOLEAN, DATE, DATETIME, INTEGER, VARCHAR
+from sqlalchemy.dialects.mysql import BIGINT,  BOOLEAN, CHAR, DATE, DATETIME, INTEGER, VARCHAR
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 
@@ -163,6 +163,49 @@ class Localization(Base):
     id = Column(INTEGER(unsigned=True), primary_key=True, autoincrement=True)
     latitude = Column(DECIMAL(9, 6))
     longitude = Column(DECIMAL(9, 6))
+
+
+class LocalizationCountry(Base):
+    __tablename__ = 'counter_localization_country'
+    __table_args__ = (Index('idx_country_code_clc', 'country_code'),)
+
+    idlocalization = Column(INTEGER(unsigned=True), primary_key=True)
+    country_code = Column(CHAR(2), nullable=False)
+
+
+class ArticleMetricCountry(Base):
+    __tablename__ = 'counter_article_metric_country'
+    __table_args__ = (
+        UniqueConstraint(
+            'collection',
+            'year_month_day',
+            'idarticle',
+            'idformat',
+            'idlanguage',
+            'country_code',
+            name='uni_col_date_art_fmt_lang_country_camc',
+        ),
+    )
+    __table_args__ += (
+        Index('idx_col_date_country_camc', 'collection', 'year_month_day', 'country_code'),
+        Index('idx_col_art_date_camc', 'collection', 'idarticle', 'year_month_day'),
+    )
+
+    id = Column(BIGINT(unsigned=True), primary_key=True, autoincrement=True)
+
+    collection = Column(VARCHAR(3), nullable=False)
+    idarticle = Column(INTEGER(unsigned=True), ForeignKey('counter_article.id', name='idarticle_camc'))
+    article = relationship(Article)
+
+    idformat = Column(INTEGER(unsigned=True), ForeignKey('counter_article_format.id', name='idformat_camc'))
+    idlanguage = Column(INTEGER(unsigned=True), ForeignKey('counter_article_language.id', name='idlanguage_camc'))
+    year_month_day = Column(Date, nullable=False)
+    country_code = Column(CHAR(2), nullable=False)
+
+    total_item_requests = Column(BIGINT, nullable=False)
+    total_item_investigations = Column(BIGINT, nullable=False)
+    unique_item_requests = Column(BIGINT, nullable=False)
+    unique_item_investigations = Column(BIGINT, nullable=False)
 
 
 class JournalMetric(Base):
