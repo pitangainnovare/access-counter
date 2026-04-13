@@ -870,6 +870,9 @@ def main():
                         format='[%(asctime)s] %(levelname)s %(message)s',
                         datefmt='%d/%b/%Y %H:%M:%S')
 
+    logging.info('Ensuring COUNTER tables exist...')
+    lib_database.ensure_tables(MATOMO_DATABASE_STRING)
+
     logging.info('Checking repairing files...')
     check_repairing_files()
 

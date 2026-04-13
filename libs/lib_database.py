@@ -24,15 +24,20 @@ from models.declarative import (
 )
 
 
+def ensure_tables(matomo_db_uri):
+    engine = create_engine(matomo_db_uri)
+    Base.metadata.create_all(engine)
+
+
 def create_tables(matomo_db_uri):
     """
     Cria tabelas na base de dados MariaDB
 
     @param matomo_db_uri: string de conexão à base do Matomo
     """
-    engine = create_engine(matomo_db_uri)
-    Base.metadata.create_all(engine)
+    ensure_tables(matomo_db_uri)
 
+    engine = create_engine(matomo_db_uri)
     db_session = sessionmaker(bind=engine)
 
     _add_basic_article_languages(db_session())

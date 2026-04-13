@@ -279,6 +279,9 @@ def main():
                         format='[%(asctime)s] %(levelname)s %(message)s',
                         datefmt='%d/%b/%Y %H:%M:%S')
 
+    logging.info('Ensuring COUNTER tables exist...')
+    lib_database.ensure_tables(STR_CONNECTION)
+
     logging.info(f'Detectando datas a serem agregadas...')
     with SESSION_FACTORY() as dbsession:
         dates = _extract_dates_from_period(params.period) if not params.auto else lib_database.get_dates_available_for_aggregation(dbsession, params.collection)
