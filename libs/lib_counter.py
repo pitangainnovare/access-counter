@@ -39,11 +39,36 @@ def generate_session_id(ip: str, browser_name: str, browser_version: str, date: 
     return '|'.join([ip, user_agent, date_slice])
 
 
+def _get_double_click_signature(group, hit):
+    """
+    Monta uma assinatura canônica para comparação de double-click.
+
+    Para artigos, removemos o `format` da assinatura para evitar que a lógica
+    de duplicidade dependa da forma de entrega do item.
+    """
+    if group == 'article':
+        return (
+            getattr(hit, 'pid', ''),
+            getattr(hit, 'content_type', ''),
+            getattr(hit, 'lang', ''),
+        )
+
+    if group == 'issue' or group == 'journal':
+        return (
+            getattr(hit, 'issn', ''),
+            getattr(hit, 'pid', ''),
+            getattr(hit, 'content_type', ''),
+        )
+
+    return (
+        getattr(hit, 'content_type', ''),
+        getattr(hit, 'action_name', ''),
+    )
+
+
 def is_double_click(group, past_hit, current_hit):
     """
-    Verifica se a ação atual (current_action) é um duplo-clique. É condição necessária que ambos os Hits possuam
-     a mesma estrutura de comparação. Por exemplo, a quadra (pid, format, content_type, language) serve para comparar
-     o grupo 'article'.
+    Verifica se a ação atual é um duplo-clique usando uma assinatura canônica em até 30 segundos.
 
     :param group: grupo de Hits (article | issue | journal | platform | others)
     :param past_hit: ação mais antiga
@@ -52,32 +77,7 @@ def is_double_click(group, past_hit, current_hit):
     """
     time_delta = current_hit.server_time - past_hit.server_time
 
-    if group == 'article':
-        if (past_hit.pid,
-            past_hit.format,
-            past_hit.content_type,
-            past_hit.lang) == (current_hit.pid,
-                               current_hit.format,
-                               current_hit.content_type,
-                               current_hit.lang):
+    if time_delta.total_seconds() > 30:
+        return False
 
-            if time_delta.total_seconds() <= 30:
-                return True
-
-    if group == 'issue' or group == 'journal':
-        if (past_hit.issn,
-            past_hit.pid,
-            past_hit.content_type) == (current_hit.issn,
-                                       current_hit.pid,
-                                       current_hit.content_type):
-            if time_delta.total_seconds() <= 30:
-                return True
-
-    if group == 'platform' or group == 'others':
-        if (past_hit.content_type,
-            past_hit.action_name) == (current_hit.content_type,
-                                      current_hit.action_name):
-            if time_delta.total_seconds() <= 30:
-                return True
-
-    return False
+    return _get_double_click_signature(group, past_hit) == _get_double_click_signature(group, current_hit)

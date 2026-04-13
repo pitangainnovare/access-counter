@@ -173,33 +173,61 @@ class LocalizationCountry(Base):
     country_code = Column(CHAR(2), nullable=False)
 
 
-class ArticleMetricCountry(Base):
-    __tablename__ = 'counter_article_metric_country'
+class ArticleMetricDay(Base):
+    __tablename__ = 'counter_article_metric_day'
     __table_args__ = (
         UniqueConstraint(
             'collection',
             'year_month_day',
             'idarticle',
-            'idformat',
-            'idlanguage',
-            'country_code',
-            name='uni_col_date_art_fmt_lang_country_camc',
+            name='uni_col_date_art_camd',
         ),
     )
     __table_args__ += (
-        Index('idx_col_date_country_camc', 'collection', 'year_month_day', 'country_code'),
-        Index('idx_col_art_date_camc', 'collection', 'idarticle', 'year_month_day'),
+        Index('idx_col_date_art_camd', 'collection', 'year_month_day', 'idarticle'),
+        Index('idx_col_art_date_camd', 'collection', 'idarticle', 'year_month_day'),
     )
 
     id = Column(BIGINT(unsigned=True), primary_key=True, autoincrement=True)
 
     collection = Column(VARCHAR(3), nullable=False)
-    idarticle = Column(INTEGER(unsigned=True), ForeignKey('counter_article.id', name='idarticle_camc'))
+    idarticle = Column(INTEGER(unsigned=True), ForeignKey('counter_article.id', name='idarticle_camd'))
     article = relationship(Article)
 
-    idformat = Column(INTEGER(unsigned=True), ForeignKey('counter_article_format.id', name='idformat_camc'))
-    idlanguage = Column(INTEGER(unsigned=True), ForeignKey('counter_article_language.id', name='idlanguage_camc'))
     year_month_day = Column(Date, nullable=False)
+
+    total_item_requests = Column(BIGINT, nullable=False)
+    total_item_investigations = Column(BIGINT, nullable=False)
+    unique_item_requests = Column(BIGINT, nullable=False)
+    unique_item_investigations = Column(BIGINT, nullable=False)
+
+
+class ArticleMetricCountryLanguageMonth(Base):
+    __tablename__ = 'counter_article_metric_country_language_month'
+    __table_args__ = (
+        UniqueConstraint(
+            'collection',
+            'year_month',
+            'idarticle',
+            'country_code',
+            'idlanguage',
+            name='uni_col_ym_art_country_lang_camclm',
+        ),
+    )
+    __table_args__ += (
+        Index('idx_col_ym_country_camclm', 'collection', 'year_month', 'country_code'),
+        Index('idx_col_ym_lang_camclm', 'collection', 'year_month', 'idlanguage'),
+        Index('idx_col_art_ym_camclm', 'collection', 'idarticle', 'year_month'),
+    )
+
+    id = Column(BIGINT(unsigned=True), primary_key=True, autoincrement=True)
+
+    collection = Column(VARCHAR(3), nullable=False)
+    idarticle = Column(INTEGER(unsigned=True), ForeignKey('counter_article.id', name='idarticle_camclm'))
+    article = relationship(Article)
+
+    idlanguage = Column(INTEGER(unsigned=True), ForeignKey('counter_article_language.id', name='idlanguage_camclm'))
+    year_month = Column(VARCHAR(7), nullable=False)
     country_code = Column(CHAR(2), nullable=False)
 
     total_item_requests = Column(BIGINT, nullable=False)

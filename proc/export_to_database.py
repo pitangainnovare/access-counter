@@ -6,8 +6,10 @@ import os
 import re
 import time
 import unicodedata
+import reverse_geocode
 
 from sqlalchemy import create_engine
+from sqlalchemy.dialects.mysql import insert as mysql_insert
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.exc import OperationalError
 from decimal import Decimal
@@ -26,10 +28,12 @@ from models.declarative import (
     Journal,
     JournalCollection,
     Localization,
+    LocalizationCountry,
     ArticleFormat,
     ArticleLanguage,
     Article,
-    ArticleMetric,
+    ArticleMetricDay,
+    ArticleMetricCountryLanguageMonth,
     JournalMetric,
     SushiJournalMetric,
     SushiJournalYOPMetric,
@@ -41,7 +45,10 @@ MATOMO_DATABASE_STRING = os.environ.get('MATOMO_DATABASE_STRING', 'mysql://user:
 COLLECTION = os.environ.get('COLLECTION', 'scl')
 MIN_YEAR = int(os.environ.get('MIN_YEAR', '1900'))
 LOGGING_LEVEL = os.environ.get('LOGGING_LEVEL', 'INFO')
-TABLES_TO_PERSIST = os.environ.get('TABLES_TO_PERSIST', 'counter_foreign,counter_article_metric,counter_journal_metric,sushi_article_metric,sushi_journal_metric,sushi_journal_yop_metric')
+TABLES_TO_PERSIST = os.environ.get(
+    'TABLES_TO_PERSIST',
+    'counter_foreign,counter_article_metric_day,counter_article_metric_country_language_month,counter_journal_metric,sushi_article_metric,sushi_journal_metric,sushi_journal_yop_metric',
+)
 
 DIR_R5_METRICS = os.environ.get('DIR_R5_METRICS', '/app/data/r5')
 DIR_R5_METRICS_TO_REPAIR = os.path.join(DIR_R5_METRICS, 'to_repair')
@@ -121,6 +128,93 @@ def sum_metrics(m1, m2):
     return [m1[x] + m2[x] for x in range(4)]
 
 
+METRIC_COLUMNS = [
+    'total_item_investigations',
+    'total_item_requests',
+    'unique_item_investigations',
+    'unique_item_requests',
+]
+
+
+def _chunk_rows(rows, chunk_size):
+    for start in range(0, len(rows), chunk_size):
+        yield rows[start:start + chunk_size]
+
+
+def _build_metric_row(table_class, key, values, collection, next_id=None):
+    table_name = table_class.__tablename__
+    tii, tir, uii, uir = values
+
+    row = {
+        'total_item_investigations': tii,
+        'total_item_requests': tir,
+        'unique_item_investigations': uii,
+        'unique_item_requests': uir,
+    }
+
+    if next_id is not None:
+        row['id'] = next_id
+
+    if table_name == 'counter_article_metric':
+        idarticle, idlanguage, idformat, idlocalization, year_month_day = key
+        row.update({
+            'idarticle': idarticle,
+            'idlanguage': idlanguage,
+            'idformat': idformat,
+            'idlocalization': idlocalization,
+            'year_month_day': year_month_day,
+        })
+    elif table_name == 'counter_article_metric_day':
+        item_collection, idarticle, year_month_day = key
+        row.update({
+            'collection': item_collection,
+            'idarticle': idarticle,
+            'year_month_day': year_month_day,
+        })
+    elif table_name == 'counter_article_metric_country_language_month':
+        item_collection, idarticle, idlanguage, country_code, year_month = key
+        row.update({
+            'collection': item_collection,
+            'idarticle': idarticle,
+            'idlanguage': idlanguage,
+            'country_code': country_code,
+            'year_month': year_month,
+        })
+    elif table_name == 'counter_journal_metric':
+        idjournal_cjm, idlanguage_cjm, idformat_cjm, yop, year_month_day = key
+        row.update({
+            'idjournal_cjm': idjournal_cjm,
+            'idlanguage_cjm': idlanguage_cjm,
+            'idformat_cjm': idformat_cjm,
+            'yop': yop,
+            'year_month_day': year_month_day,
+            'collection': collection,
+        })
+    elif table_name == 'sushi_journal_yop_metric':
+        idjournal_sjym, yop, year_month_day = key
+        row.update({
+            'idjournal_sjym': idjournal_sjym,
+            'yop': yop,
+            'year_month_day': year_month_day,
+            'collection': collection,
+        })
+    elif table_name == 'sushi_journal_metric':
+        idjournal_sjm, year_month_day = key
+        row.update({
+            'idjournal_sjm': idjournal_sjm,
+            'year_month_day': year_month_day,
+            'collection': collection,
+        })
+    elif table_name == 'sushi_article_metric':
+        idarticle_sam, year_month_day = key
+        row.update({
+            'idarticle_sam': idarticle_sam,
+            'year_month_day': year_month_day,
+        })
+
+    return row
+
+
 def mount_issn_map(session):
     """
     Cria mapa de ISSN chave para ISSN valor, com base na banco de dados COUNTER
@@ -155,6 +249,19 @@ def mount_localization_map(session):
     for m in session.query(Localization):
         localization_map[(m.latitude, m.longitude)] = m.id
     return localization_map
+
+
+def mount_localization_country_map(session):
+    """
+    Cria mapa de ID de localização para código de país na base de dados
+    :param session: Sessão de conexão com banco de dados COUNTER
+    :return: Um dicionário que mapeia ID de localização a country_code
+    """
+    localization_country_map = {}
+
+    for m in session.query(LocalizationCountry):
+        localization_country_map[m.idlocalization] = m.country_code
+    return localization_country_map
 
 
 def mount_format_map(session):
@@ -313,6 +420,53 @@ def update_localization_table(r5_metrics, db_session, localization_map):
         return True
 
 
+def _normalize_country_code(result):
+    country_code = (result or {}).get('country_code', 'ZZ')
+    country_code = country_code.upper() if isinstance(country_code, str) else 'ZZ'
+    return country_code if len(country_code) == 2 else 'ZZ'
+
+
+def update_localization_country_table(r5_metrics, db_session, localization_map, localization_country_map):
+    """
+    Atualiza banco de dados com códigos de país para IDs de localização já conhecidos
+    :param r5_metrics: lista de instâncias R5Metric
+    :param db_session: Sessão de conexão com banco de dados
+    :param localization_map: Dicionário que mapeia (latitude, longitude) a ID de localização
+    :param localization_country_map: Dicionário que mapeia ID de localização a country_code
+    """
+    coord_to_loc_id = {}
+    for r in r5_metrics:
+        coord = (r.latitude, r.longitude)
+        localization_id = localization_map.get(coord)
+        if localization_id and localization_id not in localization_country_map:
+            coord_to_loc_id[coord] = localization_id
+
+    if not coord_to_loc_id:
+        return False
+
+    coordinates = [[float(latitude), float(longitude)] for latitude, longitude in coord_to_loc_id.keys()]
+    reverse_results = reverse_geocode.search(coordinates)
+
+    objects = []
+    for coord, result in zip(coord_to_loc_id.keys(), reverse_results):
+        localization_id = coord_to_loc_id[coord]
+        country_code = _normalize_country_code(result)
+
+        new_localization_country = LocalizationCountry()
+        new_localization_country.idlocalization = localization_id
+        new_localization_country.country_code = country_code
+
+        localization_country_map[localization_id] = country_code
+        objects.append(new_localization_country)
+
+    if objects:
+        db_session.bulk_save_objects(objects)
+        db_session.commit()
+        return True
+
+    return False
+
+
 def update_format_table(r5_metrics, db_session, format_map):
     """
     Atualiza banco de dados com novos formatos
@@ -406,10 +560,8 @@ def persist_metrics(r5_metrics, db_session, maps, key_list, table_class, collect
     if len(r5_metrics) == 0:
         return True
 
-    objects = []
-
     # Obtém um dicionário de métricas agregadas pelos valores associados a chave de key_list
-    aggregated_metrics = _aggregate_by_keylist(r5_metrics, key_list, maps)
+    aggregated_metrics = _aggregate_by_keylist(r5_metrics, key_list, maps, collection)
 
     # Data das métricas
     year_month_day = r5_metrics[0].year_month_day
@@ -422,56 +574,11 @@ def persist_metrics(r5_metrics, db_session, maps, key_list, table_class, collect
         _dump_repairing_data(year_month_day, key_list)
         return False
 
+    objects = []
+
     # Transforma dicionário de métricas em itens persistíveis no banco de dados
     for k, v in aggregated_metrics.items():
-        row = {}
-        tii, tir, uii, uir = v
-        row.update({'id': next_id,
-                    'total_item_investigations': tii,
-                    'total_item_requests': tir,
-                    'unique_item_investigations': uii,
-                    'unique_item_requests': uir})
-
-        # É métrica agregada para artigo
-        if table_class.__tablename__ == 'counter_article_metric':
-            idarticle, idlanguage, idformat, idlocalization, year_month_day = k
-            row.update({'idarticle': idarticle,
-                        'idlanguage': idlanguage,
-                        'idformat': idformat,
-                        'idlocalization': idlocalization,
-                        'year_month_day': year_month_day})
-
-        # É métrica agregada para periódico
-        elif table_class.__tablename__ == 'counter_journal_metric':
-            idjournal_cjm, idlanguage_cjm, idformat_cjm, yop, year_month_day = k
-            row.update({'idjournal_cjm': idjournal_cjm,
-                        'idlanguage_cjm': idlanguage_cjm,
-                        'idformat_cjm': idformat_cjm,
-                        'yop': yop,
-                        'year_month_day': year_month_day,
-                        'collection': collection})
-
-        # É métrica agregada para periódico e ano de publicação na tabela SUSHI
-        elif table_class.__tablename__ == 'sushi_journal_yop_metric':
-            idjournal_sjym, yop, year_month_day = k
-            row.update({'idjournal_sjym': idjournal_sjym,
-                        'yop': yop,
-                        'year_month_day': year_month_day,
-                        'collection': collection})
-
-        # É métrica agregada para periódico na tabela SUSHI
-        elif table_class.__tablename__ == 'sushi_journal_metric':
-            idjournal_sjm, year_month_day = k
-            row.update({'idjournal_sjm': idjournal_sjm,
-                        'year_month_day': year_month_day,
-                        'collection': collection})
-
-        # É métrica agregada para artigo na tabela SUSHI
-        elif table_class.__tablename__ == 'sushi_article_metric':
-            idarticle_sam, year_month_day = k
-            row.update({'idarticle_sam': idarticle_sam,
-                        'year_month_day': year_month_day})
-
+        row = _build_metric_row(table_class, k, v, collection, next_id=next_id)
         objects.append(row)
         next_id += 1
 
@@ -493,7 +600,51 @@ def persist_metrics(r5_metrics, db_session, maps, key_list, table_class, collect
     return True
 
 
-def _aggregate_by_keylist(r5_metrics, key_list, maps):
+def persist_metrics_upsert(r5_metrics, db_session, maps, key_list, table_class, collection, update_mode='overwrite'):
+    """
+    Persiste métricas com upsert.
+
+    update_mode:
+      - overwrite: regrava os quatro contadores
+      - increment: soma os quatro contadores ao registro existente
+    """
+    if len(r5_metrics) == 0:
+        return True
+
+    aggregated_metrics = _aggregate_by_keylist(r5_metrics, key_list, maps, collection)
+    rows = [_build_metric_row(table_class, k, v, collection) for k, v in aggregated_metrics.items()]
+
+    if not rows:
+        return True
+
+    table = table_class.__table__
+
+    try:
+        for chunk in _chunk_rows(rows, SESSION_BULK_LIMIT):
+            stmt = mysql_insert(table).values(chunk)
+
+            if update_mode == 'increment':
+                update_mapping = {
+                    column: table.c[column] + getattr(stmt.inserted, column)
+                    for column in METRIC_COLUMNS
+                }
+            else:
+                update_mapping = {
+                    column: getattr(stmt.inserted, column)
+                    for column in METRIC_COLUMNS
+                }
+
+            db_session.execute(stmt.on_duplicate_key_update(**update_mapping))
+            db_session.commit()
+    except OperationalError:
+        year_month_day = r5_metrics[0].year_month_day
+        _dump_repairing_data(year_month_day, key_list)
+        return False
+
+    return True
+
+
+def _aggregate_by_keylist(r5_metrics, key_list, maps, collection=None):
     """
     Agrega métricas de acordo com uma lista de chaves de agregação
 
@@ -509,17 +660,23 @@ def _aggregate_by_keylist(r5_metrics, key_list, maps):
             logging.warning("ISSN vazio ou não encontrado no mapa em %s", r)
             continue
 
-        attrs = {'collection': COLLECTION,
+        localization_id = maps['localization'][(r.latitude, r.longitude)]
+
+        current_collection = collection or COLLECTION
+
+        attrs = {'collection': current_collection,
                  'idjournal_cjm': maps['issn'][r.issn],
                  'idjournal_sjm': maps['issn'][r.issn],
                  'idjournal_sjym': maps['issn'][r.issn],
-                 'idarticle': maps['pid'][(r.pid, COLLECTION)],
-                 'idarticle_sam': maps['pid'][(r.pid, COLLECTION)],
+                 'idarticle': maps['pid'][(r.pid, current_collection)],
+                 'idarticle_sam': maps['pid'][(r.pid, current_collection)],
                  'idlanguage': maps['language'][r.language_name],
                  'idlanguage_cjm': maps['language'][r.language_name],
                  'idformat': maps['format'][r.format_name],
                  'idformat_cjm': maps['format'][r.format_name],
-                 'idlocalization': maps['localization'][(r.latitude, r.longitude)],
+                 'idlocalization': localization_id,
+                 'country_code': maps['localization_country'].get(localization_id, 'ZZ'),
+                 'year_month': r.year_month_day[:7],
                  'yop': r.year_of_publication,
                  'year_month_day': r.year_month_day}
 
@@ -555,6 +712,14 @@ def check_repairing_files():
                                 'idformat',
                                 'idlocalization',
                                 'year_month_day']): 'counter_article_metric',
+                     '\t'.join(['collection',
+                                'idarticle',
+                                'year_month_day']): 'counter_article_metric_day',
+                     '\t'.join(['collection',
+                                'idarticle',
+                                'idlanguage',
+                                'country_code',
+                                'year_month']): 'counter_article_metric_country_language_month',
                      '\t'.join(['idjournal_cjm',
                                 'idlanguage_cjm',
                                 'idformat_cjm',
@@ -586,19 +751,26 @@ def check_repairing_files():
                 table = keys_to_table.get(keys, '')
 
                 if table:
+                    status_metric_name = 'status_%s' % table
                     if table in {'sushi_journal_metric', 'sushi_journal_yop_metric', 'counter_journal_metric'}:
                         raw_query = 'DELETE FROM {0} WHERE collection = "{1}" AND year_month_day = "{2}";'.format(table, collection, date)
                     elif table == 'sushi_article_metric':
                         raw_query = 'DELETE FROM {0} WHERE year_month_day = "{1}" AND idarticle_sam IN (SELECT DISTINCT id FROM counter_article WHERE collection = "{2}");'.format(table, date, collection)
                     elif table == 'counter_article_metric':
                         raw_query = 'DELETE FROM {0} WHERE year_month_day = "{1}" AND idarticle IN (SELECT DISTINCT id FROM counter_article WHERE collection = "{2}");'.format(table, date, collection)
+                    elif table == 'counter_article_metric_day':
+                        raw_query = 'DELETE FROM {0} WHERE year_month_day = "{1}" AND collection = "{2}";'.format(table, date, collection)
+                        status_metric_name = 'status_counter_article_metric'
+                    elif table == 'counter_article_metric_country_language_month':
+                        raw_query = 'DELETE FROM {0} WHERE year_month = "{1}" AND collection = "{2}";'.format(table, date[:7], collection)
+                        status_metric_name = 'status_counter_article_metric'
 
                     try:
                         logging.info('Executing query to fix (%s, %s, %s)...' % (collection, table, date))
                         ENGINE.execute(raw_query)
 
                         logging.info('Fixing control_date_status table...')
-                        raw_query_cds = 'UPDATE control_date_status SET status_{0} = 0, status = 4 WHERE collection = "{1}" and date = "{2}";'.format(table, collection, date)
+                        raw_query_cds = 'UPDATE control_date_status SET {0} = 0, status = 4 WHERE collection = "{1}" and date = "{2}";'.format(status_metric_name, collection, date)
                         ENGINE.execute(raw_query_cds)
                     except:
                         logging.error('Failed to fix tables')
@@ -633,6 +805,8 @@ def get_files_to_persist(dir_r5_metrics, db_session):
 
 def need_to_update_memory_data(target_tables):
     for t in ['counter_article_metric',
+              'counter_article_metric_day',
+              'counter_article_metric_country_language_month',
               'counter_journal_metric',
               'sushi_article_metric',
               'sushi_journal_metric',
@@ -666,7 +840,9 @@ def main():
         type=str,
         help='Lista de tabelas a serem persistidas (indicar os nomes das tabelas separados por vírgula). '
              'Por padrão é o valor da variável de ambiente TABLES_TO_PERSIST ou '
-             'counter_foreign,counter_journal_metric,sushi_journal_metric,sushi_journal_yop_metric'
+             'counter_foreign,counter_article_metric_day,'
+             'counter_article_metric_country_language_month,counter_journal_metric,'
+             'sushi_article_metric,sushi_journal_metric,sushi_journal_yop_metric'
     )
 
     parser.add_argument(
@@ -682,7 +858,7 @@ def main():
         dest='ignore_counter_metric_tables',
         action='store_true',
         default=False,
-        help='Não persiste dados nas tabelas counter_article_metric e counter_journal_metric'
+        help='Não persiste dados nas tabelas de métricas COUNTER (legadas e novas) nem em counter_journal_metric'
     )
 
     params = parser.parse_args()
@@ -700,6 +876,7 @@ def main():
     # Obtém dicionários que mapeia ISSN a ISSN-Chave, Idioma a ID e Formato a ID
     issn_map = mount_issn_map(SESSION_FACTORY())
     localization_map = mount_localization_map(SESSION_FACTORY())
+    localization_country_map = mount_localization_country_map(SESSION_FACTORY())
     language_map = mount_language_map(SESSION_FACTORY())
     format_map = mount_format_map(SESSION_FACTORY())
     pid_map = mount_pid_map(SESSION_FACTORY())
@@ -723,7 +900,7 @@ def main():
             target_tables = ['counter_foreign']
             target_tables.extend(get_missing_aggregations(SESSION_FACTORY(), COLLECTION, f_date))
         else:
-            target_tables = params.tables.split(',')
+            target_tables = [table.strip() for table in params.tables.split(',') if table.strip()]
 
         logging.info('Tabelas a serem persistidas: (%s)' % ','.join(target_tables))
 
@@ -746,6 +923,18 @@ def main():
                 logging.info('Recarregando dados de localização')
                 localization_map = mount_localization_map(SESSION_FACTORY())
 
+            logging.info('Atualizando lista de países por localização...')
+            exist_new_localization_countries = update_localization_country_table(
+                r5_metrics,
+                SESSION_FACTORY(),
+                localization_map,
+                localization_country_map,
+            )
+
+            if exist_new_localization_countries and need_to_update_memory_data(target_tables):
+                logging.info('Recarregando dados de país por localização')
+                localization_country_map = mount_localization_country_map(SESSION_FACTORY())
+
             # Atualiza formatos de artigo no banco de dados
             logging.info('Atualizando formatos...')
             update_format_table(r5_metrics, SESSION_FACTORY(), format_map)
@@ -762,13 +951,60 @@ def main():
                 logging.info('Recarregando dados de PID e COLLECTION')
                 pid_map = mount_pid_map(SESSION_FACTORY())
 
-        maps = {'pid': pid_map, 'language': language_map, 'format': format_map, 'localization': localization_map, 'issn': issn_map}
+        maps = {
+            'pid': pid_map,
+            'language': language_map,
+            'format': format_map,
+            'localization': localization_map,
+            'localization_country': localization_country_map,
+            'issn': issn_map
+        }
+
+        article_metric_statuses = []
 
         if 'counter_article_metric' in target_tables and not params.ignore_counter_metric_tables:
-            logging.info('Adicionando métricas agregadas para counter_article...')
-            keys_counter_article = ['idarticle', 'idlanguage', 'idformat', 'idlocalization', 'year_month_day']
-            cam_status = persist_metrics(r5_metrics, SESSION_FACTORY(), maps, keys_counter_article, ArticleMetric, COLLECTION)
-            update_date_metric_status(SESSION_FACTORY(), COLLECTION, f_date, 'status_counter_article_metric', cam_status)
+            logging.error(
+                'A tabela counter_article_metric está desativada para escrita porque o campo id atingiu o limite. '
+                'Remova counter_article_metric de TABLES_TO_PERSIST.'
+            )
+            article_metric_statuses.append(False)
+
+        if 'counter_article_metric_day' in target_tables and not params.ignore_counter_metric_tables:
+            logging.info('Adicionando métricas agregadas para counter_article_metric_day...')
+            keys_counter_article_day = ['collection', 'idarticle', 'year_month_day']
+            camd_status = persist_metrics_upsert(
+                r5_metrics,
+                SESSION_FACTORY(),
+                maps,
+                keys_counter_article_day,
+                ArticleMetricDay,
+                COLLECTION,
+                update_mode='overwrite',
+            )
+            article_metric_statuses.append(camd_status)
+
+        if 'counter_article_metric_country_language_month' in target_tables and not params.ignore_counter_metric_tables:
+            logging.info('Adicionando métricas agregadas para counter_article_metric_country_language_month...')
+            keys_counter_article_country_language_month = ['collection', 'idarticle', 'idlanguage', 'country_code', 'year_month']
+            camclm_status = persist_metrics_upsert(
+                r5_metrics,
+                SESSION_FACTORY(),
+                maps,
+                keys_counter_article_country_language_month,
+                ArticleMetricCountryLanguageMonth,
+                COLLECTION,
+                update_mode='increment',
+            )
+            article_metric_statuses.append(camclm_status)
+
+        if article_metric_statuses:
+            update_date_metric_status(
+                SESSION_FACTORY(),
+                COLLECTION,
+                f_date,
+                'status_counter_article_metric',
+                all(article_metric_statuses),
+            )
 
         if 'counter_journal_metric' in target_tables and not params.ignore_counter_metric_tables:
             logging.info('Adicionando métricas agregadas para counter_journal...')

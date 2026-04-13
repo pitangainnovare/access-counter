@@ -242,7 +242,13 @@ def get_missing_aggregations(db_session, collection, date):
                        'status_sushi_journal_yop_metric']:
             i_value = getattr(existing_date, i_name)
             if i_value == 0:
-                missing_aggregations.append(i_name.replace('status_', ''))
+                if i_name == 'status_counter_article_metric':
+                    missing_aggregations.extend([
+                        'counter_article_metric_day',
+                        'counter_article_metric_country_language_month',
+                    ])
+                else:
+                    missing_aggregations.append(i_name.replace('status_', ''))
 
         return missing_aggregations
     except NoResultFound:
@@ -358,27 +364,27 @@ def extract_aggregate_data_for_article_journal_year_month(database_uri, collecti
             unique_item_investigations
         )
         SELECT
-            ca.collection,
-            sam.idarticle_sam,
+            camd.collection,
+            camd.idarticle,
             ca.idjournal_a,
-            substr(sam.year_month_day, 1, 7) AS ym,
-            sum(sam.total_item_requests) AS tir,
-            sum(sam.total_item_investigations) AS tii,
-            sum(sam.unique_item_requests) AS uir,
-            sum(sam.unique_item_investigations) AS uii
+            substr(camd.year_month_day, 1, 7) AS ym,
+            sum(camd.total_item_requests) AS tir,
+            sum(camd.total_item_investigations) AS tii,
+            sum(camd.unique_item_requests) AS uir,
+            sum(camd.unique_item_investigations) AS uii
         FROM
-            sushi_article_metric sam
+            counter_article_metric_day camd
         JOIN
-            counter_article ca ON ca.id = sam.idarticle_sam
+            counter_article ca ON ca.id = camd.idarticle
         JOIN
             counter_journal_collection cjc ON cjc.idjournal_jc = ca.idjournal_a
         WHERE
             cjc.collection = '{0}' AND
-            cjc.collection = ca.collection AND
+            cjc.collection = camd.collection AND
             year_month_day = '{1}'
         GROUP BY
-            ca.collection,
-            sam.idarticle_sam,
+            camd.collection,
+            camd.idarticle,
             ca.idjournal_a,
             ym
     ON DUPLICATE KEY UPDATE
@@ -389,227 +395,6 @@ def extract_aggregate_data_for_article_journal_year_month(database_uri, collecti
     ;
     '''.format(collection, date)
     engine = create_engine(database_uri)
-    return engine.execute(raw_query)
-
-
-def extract_aggregated_data_for_article_language_year_month(database_uri, collection, date):
-    raw_query = '''
-    INSERT INTO
-        aggr_article_language_year_month_metric (
-            collection,
-            article_id,
-            language_id,
-            `year_month`,
-            total_item_requests,
-            total_item_investigations,
-            unique_item_requests,
-            unique_item_investigations
-        )
-        SELECT
-            ca.collection,
-            cam.idarticle,
-            cam.idlanguage,
-            substr(cam.year_month_day, 1, 7) AS ym,
-            sum(cam.total_item_requests) AS tir,
-            sum(cam.total_item_investigations) AS tii,
-            sum(cam.unique_item_requests) AS uir,
-            sum(cam.unique_item_investigations) AS uii
-        FROM
-            counter_article_metric cam
-        JOIN
-            counter_article ca ON ca.id = cam.idarticle
-        JOIN
-            counter_journal_collection cjc ON cjc.idjournal_jc = ca.idjournal_a
-        WHERE
-            cjc.collection = '{0}' AND
-            cjc.collection = ca.collection AND
-            year_month_day = '{1}'
-        GROUP BY
-            ca.collection,
-            cam.idarticle,
-            cam.idlanguage,
-            ym
-    ON DUPLICATE KEY UPDATE
-        total_item_requests = total_item_requests + VALUES(total_item_requests),
-        total_item_investigations = total_item_investigations + VALUES(total_item_investigations),
-        unique_item_requests = unique_item_requests + VALUES(unique_item_requests),
-        unique_item_investigations = unique_item_investigations + VALUES(unique_item_investigations)
-    ;
-    '''.format(collection, date)
-    engine = create_engine(database_uri)
-    return engine.execute(raw_query)
-
-
-def extract_aggregated_data_for_journal_language_year_month(database_uri, collection, date):
-    raw_query = '''
-    INSERT INTO
-        aggr_journal_language_year_month_metric (
-            collection,
-            journal_id,
-            language_id,
-            `year_month`,
-            total_item_requests,
-            total_item_investigations,
-            unique_item_requests,
-            unique_item_investigations
-        )
-        SELECT
-            cjc.collection,
-            cjc.idjournal_jc,
-            cam.idlanguage,
-            substr(cam.year_month_day, 1, 7) AS ym,
-            sum(cam.total_item_requests) AS tir,
-            sum(cam.total_item_investigations) AS tii,
-            sum(cam.unique_item_requests) AS uir,
-            sum(cam.unique_item_investigations) AS uii
-        FROM
-            counter_article_metric cam
-        JOIN
-            counter_article ca ON ca.id = cam.idarticle
-        JOIN
-            counter_journal_collection cjc ON cjc.idjournal_jc = ca.idjournal_a
-        WHERE
-            cjc.collection = '{0}' AND
-            cjc.collection = ca.collection AND
-            year_month_day = '{1}'
-        GROUP BY
-            cjc.collection,
-            cjc.idjournal_jc,
-            cam.idlanguage,
-            ym
-    ON DUPLICATE KEY UPDATE
-        total_item_requests = total_item_requests + VALUES(total_item_requests),
-        total_item_investigations = total_item_investigations + VALUES(total_item_investigations),
-        unique_item_requests = unique_item_requests + VALUES(unique_item_requests),
-        unique_item_investigations = unique_item_investigations + VALUES(unique_item_investigations)
-    ;
-    '''.format(collection, date)
-    engine = create_engine(database_uri)
-    return engine.execute(raw_query)
-
-
-def extract_aggregated_data_for_journal_language_yop_year_month(database_uri, collection, date):
-    raw_query = '''
-    INSERT INTO
-        aggr_journal_language_yop_year_month_metric (
-            collection,
-            journal_id,
-            language_id,
-            yop,
-            `year_month`,
-            total_item_requests,
-            total_item_investigations,
-            unique_item_requests,
-            unique_item_investigations
-        )
-        SELECT
-            cjc.collection,
-            cjc.idjournal_jc,
-            cam.idlanguage,
-            ca.yop,
-            substr(cam.year_month_day, 1, 7) AS ym,
-            sum(cam.total_item_requests) AS tir,
-            sum(cam.total_item_investigations) AS tii,
-            sum(cam.unique_item_requests) AS uir,
-            sum(cam.unique_item_investigations) AS uii
-        FROM
-            counter_article_metric cam
-        JOIN
-            counter_article ca ON ca.id = cam.idarticle
-        JOIN
-            counter_journal_collection cjc ON cjc.idjournal_jc = ca.idjournal_a
-        WHERE
-            cjc.collection = '{0}' AND
-            cjc.collection = ca.collection AND
-            year_month_day = '{1}'
-        GROUP BY
-            cjc.collection,
-            cjc.idjournal_jc,
-            cam.idlanguage,
-            ca.yop,
-            ym
-    ON DUPLICATE KEY UPDATE
-        total_item_requests = total_item_requests + VALUES(total_item_requests),
-        total_item_investigations = total_item_investigations + VALUES(total_item_investigations),
-        unique_item_requests = unique_item_requests + VALUES(unique_item_requests),
-        unique_item_investigations = unique_item_investigations + VALUES(unique_item_investigations)
-    ;
-    '''.format(collection, date)
-    engine = create_engine(database_uri)
-    return engine.execute(raw_query)
-
-
-def get_aggregated_data_for_journal_geolocation_year_month(database_uri, collection, date):
-    raw_query = '''
-    SELECT
-        cjc.collection,
-        cjc.idjournal_jc as journalID,
-        cjc.id as journalCollectionID,
-        cl.latitude,
-        cl.longitude,
-        substr(cam.year_month_day, 1, 7) AS ym,
-        sum(cam.total_item_requests) AS tir,
-        sum(cam.total_item_investigations) AS tii,
-        sum(cam.unique_item_requests) AS uir,
-        sum(cam.unique_item_investigations) AS uii
-    FROM
-        counter_article_metric cam
-    JOIN
-        counter_article ca ON ca.id = cam.idarticle
-    JOIN
-        counter_journal_collection cjc ON cjc.idjournal_jc = ca.idjournal_a
-    JOIN
-        counter_localization cl ON cl.id = cam.idlocalization
-    WHERE
-        ca.collection = cjc.collection AND
-        cjc.collection = '{0}' AND
-        cam.year_month_day = '{1}'
-    GROUP BY
-        cjc.id,
-        cam.idlocalization,
-        ym
-    ;
-    '''.format(collection, date)
-    engine = create_engine(database_uri)
-
-    return engine.execute(raw_query)
-
-
-def get_aggregated_data_for_journal_geolocation_yop_year_month(database_uri, collection, date):
-    raw_query = '''
-    SELECT
-        cjc.collection,
-        cjc.idjournal_jc as journalID,
-        cjc.id as journalCollectionID,
-        cl.latitude,
-        cl.longitude,
-        ca.yop,
-        substr(cam.year_month_day, 1, 7) AS ym,
-        sum(cam.total_item_requests) AS tir,
-        sum(cam.total_item_investigations) AS tii,
-        sum(cam.unique_item_requests) AS uir,
-        sum(cam.unique_item_investigations) AS uii
-    FROM
-        counter_article_metric cam
-    JOIN
-        counter_article ca ON ca.id = cam.idarticle
-    JOIN
-        counter_journal_collection cjc ON cjc.idjournal_jc = ca.idjournal_a
-    JOIN
-        counter_localization cl ON cl.id = cam.idlocalization
-    WHERE
-        ca.collection = cjc.collection AND
-        cjc.collection = '{0}' AND
-        cam.year_month_day = '{1}'
-    GROUP BY
-        cjc.id,
-        cam.idlocalization,
-        ca.yop,
-        ym
-    ;
-    '''.format(collection, date)
-    engine = create_engine(database_uri)
-
     return engine.execute(raw_query)
 
 

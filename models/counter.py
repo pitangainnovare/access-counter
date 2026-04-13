@@ -12,26 +12,6 @@ class CounterStat:
                         'platform': {},
                         'others': {}}
 
-    def _get_hits_by_session_and_content_type(self, hits: list):
-        """
-        Obtém um mapa de sessão -> content_type -> [hits]
-
-        :param hits: lista de hits
-        :return: um mapa de sessão para content_type e lista de hits
-        """
-        session_to_content_type_and_hits = {}
-
-        for hit in hits:
-            if hit.session_id not in session_to_content_type_and_hits:
-                session_to_content_type_and_hits[hit.session_id] = {}
-
-            if hit.content_type not in session_to_content_type_and_hits[hit.session_id]:
-                session_to_content_type_and_hits[hit.session_id][hit.content_type] = []
-
-            session_to_content_type_and_hits[hit.session_id][hit.content_type].append(hit)
-
-        return session_to_content_type_and_hits
-
     def _get_total(self, hits: list, hit_type, content_type_list):
         """
         Obtém o número total de acessos nos moldes COUNTER R5.
@@ -52,26 +32,33 @@ class CounterStat:
         :content_type_list: lista que contém content_types a serem considerados
         :return: número de acessos únicos
         """
-        unique_requests = 0
         valid_hits = [h for h in hits if h.hit_type == hit_type and h.content_type in content_type_list]
+        return 1 if valid_hits else 0
 
-        session_to_content_type_and_hits = self._get_hits_by_session_and_content_type(valid_hits)
-        for session, content_type in session_to_content_type_and_hits.items():
-            unique_requests += len(content_type)
+    def _ensure_metric_bucket(self, key, ymd, target):
+        if key not in target:
+            target[key] = {}
 
-        return unique_requests
+        if ymd not in target[key]:
+            target[key][ymd] = dicts.counter_item_metrics.copy()
 
-    def _calculate(self, datefied_hits: dict, key, target: dict, group: str):
+    def _get_article_unique_identity(self, key):
+        """
+        Define a identidade de item único para artigos.
+
+        O formato fica fora dessa identidade para que HTML/PDF/XML do mesmo artigo
+        não multipliquem as métricas unique dentro da mesma sessão.
+        """
+        pid, _, lang, latitude, longitude, yop = key
+        return pid, lang, latitude, longitude, yop
+
+    def _calculate_totals(self, datefied_hits: dict, key, target: dict, group: str):
         group_hit_type = dicts.group_to_hit_type[group]
         group_item_requests = dicts.group_to_item_requests[group]
         group_item_investigations = dicts.group_to_item_investigations[group]
 
         for ymd in datefied_hits:
-            if key not in target:
-                target[key] = {}
-
-            if ymd not in target[key]:
-                target[key][ymd] = dicts.counter_item_metrics.copy()
+            self._ensure_metric_bucket(key, ymd, target)
 
             target[key][ymd]['total_item_requests'] += self._get_total(
                 datefied_hits[ymd],
@@ -82,6 +69,18 @@ class CounterStat:
                 datefied_hits[ymd],
                 group_hit_type,
                 group_item_investigations)
+
+            # Remove valores nulos
+            if sum(target[key][ymd].values()) == 0:
+                del target[key][ymd]
+
+    def _calculate_uniques_for_non_article(self, datefied_hits: dict, key, target: dict, group: str):
+        group_hit_type = dicts.group_to_hit_type[group]
+        group_item_requests = dicts.group_to_item_requests[group]
+        group_item_investigations = dicts.group_to_item_investigations[group]
+
+        for ymd in datefied_hits:
+            self._ensure_metric_bucket(key, ymd, target)
 
             target[key][ymd]['unique_item_requests'] += self._get_unique(
                 datefied_hits[ymd],
@@ -97,6 +96,45 @@ class CounterStat:
             if sum(target[key][ymd].values()) == 0:
                 del target[key][ymd]
 
+    def _calculate_article_uniques(self, session_key_hits: dict, target: dict):
+        """
+        Calcula uniques de artigo uma vez por item/sessão/dia, distribuindo o crédito
+        para uma chave canônica entre os formatos observados.
+        """
+        article_requests = dicts.group_to_item_requests['article']
+        article_investigations = dicts.group_to_item_investigations['article']
+        families = {}
+
+        for key, hits in session_key_hits.items():
+            datefied_hits = self.get_datefied_hits(hits)
+
+            for ymd, ymd_hits in datefied_hits.items():
+                self._ensure_metric_bucket(key, ymd, target)
+
+                family_key = (ymd, self._get_article_unique_identity(key))
+                earliest_hit_time = min(hit.server_time for hit in ymd_hits)
+                family = families.setdefault(family_key, {
+                    'request_candidates': [],
+                    'investigation_candidates': [],
+                })
+
+                if self._get_unique(ymd_hits, dicts.group_to_hit_type['article'], article_requests):
+                    family['request_candidates'].append((earliest_hit_time, key))
+
+                if self._get_unique(ymd_hits, dicts.group_to_hit_type['article'], article_investigations):
+                    family['investigation_candidates'].append((earliest_hit_time, key))
+
+        for (ymd, _identity), candidates in families.items():
+            if candidates['request_candidates']:
+                _, canonical_key = min(candidates['request_candidates'], key=lambda item: (item[0], item[1]))
+                self._ensure_metric_bucket(canonical_key, ymd, target)
+                target[canonical_key][ymd]['unique_item_requests'] += 1
+
+            if candidates['investigation_candidates']:
+                _, canonical_key = min(candidates['investigation_candidates'], key=lambda item: (item[0], item[1]))
+                self._ensure_metric_bucket(canonical_key, ymd, target)
+                target[canonical_key][ymd]['unique_item_investigations'] += 1
+
     def calculate_metrics(self, data_content):
         """
         Calcula métricas COUNTER e armazena os resultados no campo self.metrics[group: {}]
@@ -107,7 +145,13 @@ class CounterStat:
             for session_id, key_hits in data_content[group].items():
                 for key, hits in key_hits.items():
                     datefied_hits = self.get_datefied_hits(hits)
-                    self._calculate(datefied_hits, key, self.metrics[group], group)
+                    self._calculate_totals(datefied_hits, key, self.metrics[group], group)
+
+                    if group != 'article':
+                        self._calculate_uniques_for_non_article(datefied_hits, key, self.metrics[group], group)
+
+                if group == 'article':
+                    self._calculate_article_uniques(key_hits, self.metrics[group])
 
     def get_datefied_hits(self, hits):
         """

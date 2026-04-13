@@ -46,8 +46,8 @@ setup(
     create_dictionaries=proc.create_dictionaries:main
     populate_journals=proc.populate_journals:main
     populate_localization_country=proc.populate_localization_country:main
-    populate_article_metric_country=proc.populate_article_metric_country:main
-    validate_article_metric_country=proc.validate_article_metric_country:main
+    validate_article_metric_day=proc.validate_article_metric_day:main
+    validate_article_metric_country_language_month=proc.validate_article_metric_country_language_month:main
     calculate_metrics=proc.calculate_metrics:main
     export_to_database=proc.export_to_database:main
     extract_pretables=proc.extract_pretables:main

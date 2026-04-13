@@ -358,16 +358,11 @@ class HitManager:
 
                     if len(hits) > 1:
                         sorted_hits = sorted(hits, key=lambda x: x.server_time)
+                        cleaned_hits = [sorted_hits[0]]
 
-                        for i in range(len(sorted_hits) - 1):
-                            past_hit = sorted_hits[i]
-                            current_hit = sorted_hits[i + 1]
-
-                            if not lib_counter.is_double_click(group, past_hit, current_hit):
-                                cleaned_hits.append(past_hit)
-                                if i + 2 == len(sorted_hits):
-                                    cleaned_hits.append(current_hit)
-                            elif i + 2 == len(sorted_hits):
+                        for current_hit in sorted_hits[1:]:
+                            last_kept_hit = cleaned_hits[-1]
+                            if not lib_counter.is_double_click(group, last_kept_hit, current_hit):
                                 cleaned_hits.append(current_hit)
                     else:
                         cleaned_hits.extend(hits)

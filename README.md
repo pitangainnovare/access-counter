@@ -47,16 +47,16 @@ __Popular tabela de países por localização__
 populate_localization_country -u STRING_CONNECTION --batch_size 5000
 ```
 
-__Popular tabela de métricas de artigo por país para um dia__
+__Validar a tabela diária enxuta de artigo__
 
 ```bash
-populate_article_metric_country -u STRING_CONNECTION -d YYYY-MM-DD -c COLLECTION_ACRONYM
+validate_article_metric_day -u STRING_CONNECTION -d YYYY-MM-DD -c COLLECTION_ACRONYM
 ```
 
-__Validar a tabela de métricas de artigo por país para um dia__
+__Validar a tabela mensal analítica de artigo (país + idioma)__
 
 ```bash
-validate_article_metric_country -u STRING_CONNECTION -d YYYY-MM-DD -c COLLECTION_ACRONYM
+validate_article_metric_country_language_month -u STRING_CONNECTION -m YYYY-MM -c COLLECTION_ACRONYM
 ```
 
 
@@ -78,10 +78,19 @@ __Exportar dados para tabelas SUSHI__
 
 ```bash
 export_to_database \
-    -c COLLECTION_ACRONYM \
     -u mysql://user:pass@host:port/database \
     --auto
 ```
+
+O `export_to_database` usa a coleção definida na variável de ambiente `COLLECTION`.
+
+No desenho atual, `export_to_database` também pode preencher:
+- `counter_article_metric_day`: camada diária enxuta por artigo
+- `counter_article_metric_country_language_month`: camada mensal analítica por artigo, país e idioma
+
+A tabela mensal é alimentada incrementalmente a partir do `r5_metrics` do dia, sem depender de uma tabela diária intermediária com país e idioma.
+
+`counter_article_metric` deixou de ser destino operacional de escrita. A CAM legada permanece apenas como estrutura histórica/compatível de leitura, porque o campo `id` atingiu o limite no ambiente produtivo.
 
 __Agregar tabelas__
 ```bash
@@ -98,6 +107,8 @@ optional arguments:
   -t {aggr_article_language_year_month_metric,aggr_journal_language_year_month_metric,aggr_journal_geolocation_year_month_metric,aggr_journal_language_yop_year_month_metric,aggr_journal_geolocation_yop_year_month_metric}, --tables {aggr_article_language_year_month_metric,aggr_journal_language_year_month_metric,aggr_journal_geolocation_year_month_metric,aggr_journal_language_yop_year_month_metric,aggr_journal_geolocation_yop_year_month_metric}
                         Tabelas a serem preenchidas
 ```
+
+No desenho atual, `aggregate` popula as tabelas `aggr_*` incrementalmente a partir do `r5_metrics` do dia, sem depender da CAM legada.
 
 
 ## Variáveis de ambiente
