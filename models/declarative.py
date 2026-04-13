@@ -196,10 +196,10 @@ class ArticleMetricDay(Base):
 
     year_month_day = Column(Date, nullable=False)
 
-    total_item_requests = Column(BIGINT, nullable=False)
-    total_item_investigations = Column(BIGINT, nullable=False)
-    unique_item_requests = Column(BIGINT, nullable=False)
-    unique_item_investigations = Column(BIGINT, nullable=False)
+    total_item_requests = Column(Integer, nullable=False)
+    total_item_investigations = Column(Integer, nullable=False)
+    unique_item_requests = Column(Integer, nullable=False)
+    unique_item_investigations = Column(Integer, nullable=False)
 
 
 class ArticleMetricCountryLanguageMonth(Base):
@@ -230,10 +230,10 @@ class ArticleMetricCountryLanguageMonth(Base):
     year_month = Column(VARCHAR(7), nullable=False)
     country_code = Column(CHAR(2), nullable=False)
 
-    total_item_requests = Column(BIGINT, nullable=False)
-    total_item_investigations = Column(BIGINT, nullable=False)
-    unique_item_requests = Column(BIGINT, nullable=False)
-    unique_item_investigations = Column(BIGINT, nullable=False)
+    total_item_requests = Column(Integer, nullable=False)
+    total_item_investigations = Column(Integer, nullable=False)
+    unique_item_requests = Column(Integer, nullable=False)
+    unique_item_investigations = Column(Integer, nullable=False)
 
 
 class JournalMetric(Base):
