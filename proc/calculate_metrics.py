@@ -93,7 +93,7 @@ def _list_files(dir_path):
     return [f for f in results if os.path.isfile(os.path.join(dir_path, f))]
 
 
-def get_pretables(db_session, max_day: datetime.datetime):
+def get_pretables(db_session, collection, max_day: datetime.datetime):
     """
     Obtém lista de caminhos de arquivos log com dados previamente extraídos do Matomo
 
@@ -111,7 +111,7 @@ def get_pretables(db_session, max_day: datetime.datetime):
 
     for pt in sorted(pretables):
         date_value = get_date_from_file_path(pt)
-        date_status = get_date_status(db_session, COLLECTION, date_value)
+        date_status = get_date_status(db_session, collection, date_value)
         
         if date_status:
             if _is_valid_for_computing(date_value, date_status, max_day, all_computed_days_in_dir):
@@ -330,7 +330,9 @@ def main():
     if not os.path.exists(DIR_R5_LOGS):
         os.makedirs(DIR_R5_LOGS)
 
-    file_log_name = COLLECTION + '_' + time().__str__() + '.log'
+    collection = params.collection
+
+    file_log_name = collection + '_' + time().__str__() + '.log'
     file_log_path = os.path.join(DIR_R5_LOGS, file_log_name)
     file_log = logging.FileHandler(file_log_path)
     file_log.setLevel(params.logging_level)
@@ -361,7 +363,7 @@ def main():
         pid_to_yop=maps['pid-dates'],
     )
 
-    pretables = get_pretables(SESSION_FACTORY(), max_day_available_for_computing)
+    pretables = get_pretables(SESSION_FACTORY(), collection, max_day_available_for_computing)
 
     logging.info('Há %d pré-tabela(s) para ser(em) computada(s)' % len(pretables))
 
@@ -378,13 +380,13 @@ def main():
             run(data=csv_data,
                 hit_manager=hit_manager,
                 db_session=SESSION_FACTORY(),
-                collection=params.collection,
+                collection=collection,
                 result_file_prefix=pretable_date_value,
                 domain=params.domain)
 
         logging.info('Atualizando tabela control_date_status para %s' % pretable_date_value)
         update_date_status(SESSION_FACTORY(),
-                            COLLECTION,
+                            collection,
                             pretable_date_value,
                             DATE_STATUS_COMPUTED)
 
