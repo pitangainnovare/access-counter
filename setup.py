@@ -56,5 +56,6 @@ setup(
     collect_articlemeta_dictionary=proc.collect_articlemeta_dictionary:main
     aggregate=proc.aggregate:main
     revert_date_status_for_pending_aggr=proc.revert_date_status_for_pending_aggr:main
+    recover_date_status_to_pretable=proc.recover_date_status_to_pretable:main
     """
 )
