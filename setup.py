@@ -55,5 +55,6 @@ setup(
     collect_preprint_dictionary=proc.collect_preprint_dictionary:main
     collect_articlemeta_dictionary=proc.collect_articlemeta_dictionary:main
     aggregate=proc.aggregate:main
+    revert_date_status_for_pending_aggr=proc.revert_date_status_for_pending_aggr:main
     """
 )
