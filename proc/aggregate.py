@@ -362,9 +362,9 @@ def main():
                     if _is_status_true(status):
                         with SESSION_FACTORY() as dbsession:
                             lib_database.update_aggr_status_for_table(dbsession, params.collection, date, lib_status.AGGR_STATUS_DONE, status_column_name)
-    
-                    logging.info('Tempo total: %.2f segundos' % (time.time() - time_start))
+                            lib_database.check_and_update_date_status_completed(dbsession, params.collection, date)
 
+                    logging.info('Tempo total: %.2f segundos' % (time.time() - time_start))
                 elif current_date_aggr_status_table is None:
                     logging.info('Data %s da coleção %s não está pronta para agregação' % (date, params.collection))
                     break

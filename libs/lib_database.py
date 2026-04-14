@@ -212,7 +212,15 @@ def get_dates_available_for_aggregation(db_session, collection):
         aggr_dates = [a.date for a in aggr_items]
         
         dates = []
-        for d in db_session.query(DateStatus).filter(and_(DateStatus.collection == collection, DateStatus.status == 5)):
+        for d in db_session.query(DateStatus).filter(and_(
+            DateStatus.collection == collection,
+            DateStatus.status_counter_article_metric == True,
+            DateStatus.status_counter_journal_metric == True,
+            DateStatus.status_sushi_article_metric == True,
+            DateStatus.status_sushi_journal_metric == True,
+            DateStatus.status_sushi_journal_yop_metric == True,
+            DateStatus.status < 5
+        )):
             if d.date not in aggr_dates:
                 dates.append(d.date)
             else:
@@ -317,6 +325,36 @@ def update_date_status(db_session, collection, date, status):
         pass
     except OperationalError:
         logging.error('Error while trying to update date status')
+
+
+def check_and_update_date_status_completed(db_session, collection, date):
+    from libs import lib_status
+    try:
+        basic_completed = compute_date_metric_status(db_session, collection, date) == 5
+        if not basic_completed:
+            return False
+
+        aggr = db_session.query(AggrStatus).filter(and_(AggrStatus.collection == collection, AggrStatus.date == date)).one()
+
+        aggr_completed = all([
+            getattr(aggr, 'status_aggr_article_journal_year_month_metric', 0) == 1,
+            getattr(aggr, 'status_aggr_article_language_year_month_metric', 0) == 1,
+            getattr(aggr, 'status_aggr_journal_language_year_month_metric', 0) == 1,
+            getattr(aggr, 'status_aggr_journal_geolocation_year_month_metric', 0) == 1,
+            getattr(aggr, 'status_aggr_journal_language_yop_year_month_metric', 0) == 1,
+            getattr(aggr, 'status_aggr_journal_geolocation_yop_year_month_metric', 0) == 1,
+        ])
+
+        if basic_completed and aggr_completed:
+            update_date_status(db_session, collection, date, lib_status.DATE_STATUS_COMPLETED)
+            return True
+
+        return False
+    except NoResultFound:
+        return False
+    except OperationalError:
+        logging.error('Error while trying to check and update date status completed')
+        return False
 
 
 def get_aggr_status(db_session, collection, date, status_column_name):

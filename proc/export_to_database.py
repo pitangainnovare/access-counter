@@ -1038,11 +1038,10 @@ def main():
                                                        f_date)
 
         if date_status_value == DATE_STATUS_COMPLETED:
-            logging.info('Atualizando tabela control_date_status para %s' % f_date)
-            update_date_status(SESSION_FACTORY(),
-                               COLLECTION,
-                               f_date,
-                               DATE_STATUS_COMPLETED)
+            logging.info('Verificando status de agregações e atualizando tabela control_date_status para %s' % f_date)
+            lib_database.check_and_update_date_status_completed(SESSION_FACTORY(),
+                                                                COLLECTION,
+                                                                f_date)
         else:
             logging.info('Data %s ainda contém agregações a serem calculadas' % f_date)
 
