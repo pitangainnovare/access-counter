@@ -361,7 +361,7 @@ def get_aggr_status(db_session, collection, date, status_column_name):
     try:
         date_status = get_date_status(db_session, collection, date)
 
-        if date_status == lib_status.DATE_STATUS_COMPLETED:
+        if date_status in [lib_status.DATE_STATUS_COMPUTED, lib_status.DATE_STATUS_COMPLETED]:
             try:
                 object_aggr_status = db_session.query(AggrStatus).filter(and_(AggrStatus.collection == collection, AggrStatus.date == date)).one()
                 return getattr(object_aggr_status, status_column_name)
@@ -378,7 +378,7 @@ def get_aggr_status(db_session, collection, date, status_column_name):
                 return lib_status.AGGR_STATUS_QUEUE
 
         else:
-            ...
+            return
 
     except OperationalError as e:
         raise e
