@@ -4,7 +4,7 @@ import logging
 import os
 import re
 
-from datetime import datetime
+from collections import Counter
 from scielo_scholarly_data import standardizer
 from utils.regular_expressions import REGEX_PREPRINT_PID_PREFIX
 from sickle import Sickle
@@ -43,17 +43,36 @@ def _extract_doi(identifiers):
             return doi
 
 
+def _first(values):
+    if isinstance(values, list):
+        return values[0] if values else ''
+
+    return values or ''
+
+
 def parse(record):
-    preprint_pid = re.match(REGEX_PREPRINT_PID_PREFIX, record.header.identifier).group(1)
+    identifier = getattr(getattr(record, 'header', None), 'identifier', '')
+    match = re.match(REGEX_PREPRINT_PID_PREFIX, identifier)
+    if not match:
+        logging.warning('Ignorando registro com identificador inválido: %s', identifier)
+        return None, 'skipped_invalid_identifier'
+
+    metadata = getattr(record, 'metadata', None)
+    if not metadata:
+        logging.warning('Ignorando registro sem metadata: %s', identifier)
+        return None, 'skipped_without_metadata'
+
+    preprint_pid = match.group(1)
+    identifiers = metadata.get('identifier', [])
 
     return {
         preprint_pid: {
-            'publication_date': record.metadata.get('date').pop(),
-            'default_language': record.metadata.get('language').pop(),
-            'doi': _extract_doi(record.metadata.get('identifier', [])),
-            'identifiers': ';'.join([i for i in record.metadata.get('identifier', [])]),
+            'publication_date': _first(metadata.get('date')),
+            'default_language': _first(metadata.get('language')),
+            'doi': _extract_doi(identifiers),
+            'identifiers': ';'.join([i for i in identifiers]),
         }
-    }
+    }, None
 
 
 def save(data, filename):
@@ -80,13 +99,24 @@ def main():
     oai_client = Sickle(endpoint=OAI_PMH_PREPRINT_ENDPOINT, max_retries=3, verify=False)
     records = oai_client.ListRecords(**{
         'metadataPrefix': OAI_METADATA_PREFIX,
-        'from': params.from_date
+        'from': params.from_date,
+        'ignore_deleted': True,
     })
 
     logging.info(f"Obtendo dados do OAI-PMH Preprints para {params.from_date}")
     data = {}
+    stats = Counter()
     for r in records:
-        data.update(parse(r))
+        stats['processed'] += 1
+        parsed, skip_reason = parse(r)
+        if parsed:
+            data.update(parsed)
+            stats['saved'] += len(parsed)
+        elif skip_reason:
+            stats[skip_reason] += 1
 
     filename = f'{PREPRINT_DICTIONARY_PREFIX}-{params.from_date}.json'
     save(data, filename)
+
+    for key in sorted(stats):
+        logging.info('%s: %s', key, stats[key])
