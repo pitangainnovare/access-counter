@@ -7,6 +7,113 @@ from scielo_scholarly_data import standardizer
 from utils.regular_expressions import REGEX_YEAR
 
 
+def _clean_value(value):
+    if value is None:
+        return ''
+    return str(value).strip()
+
+
+def _normalize_article_code_collection(collection):
+    collection = _clean_value(collection).lower()
+    if collection == 'nbr':
+        return 'scl'
+    return collection
+
+
+def _extract_doi_from_values(values):
+    candidates = []
+
+    for key in ('doi', 'DOI'):
+        candidates.append(values.get(key))
+
+    for pdf in values.get('pdfs') or []:
+        candidates.append(pdf.get('doi'))
+
+    article = values.get('article') or {}
+    for item in article.get('v237') or []:
+        candidates.append(item.get('_'))
+
+    for identifier in values.get('identifiers', '').split(';'):
+        candidates.append(identifier)
+
+    for candidate in candidates:
+        if not candidate:
+            continue
+        doi = standardizer.document_doi(candidate, return_mode='path')
+        if doi and 'error' not in doi:
+            return doi
+
+    return ''
+
+
+def _ensure_article_code_collection(article_codes, collection):
+    if collection not in article_codes:
+        article_codes[collection] = {}
+
+
+def _merge_article_code(article_codes, collection, key, pid_v2='', pid_v3='', doi=''):
+    collection = _normalize_article_code_collection(collection)
+    key = _clean_value(key)
+    pid_v2 = _clean_value(pid_v2).upper()
+    pid_v3 = _clean_value(pid_v3)
+    doi = _clean_value(doi)
+
+    if not collection or not key:
+        return
+
+    _ensure_article_code_collection(article_codes, collection)
+
+    current = article_codes[collection].setdefault(key, {
+        'collection': collection,
+        'pid_v2': '',
+        'pid_v3': '',
+        'doi': '',
+    })
+
+    for field, value in (
+        ('pid_v2', pid_v2),
+        ('pid_v3', pid_v3),
+        ('doi', doi),
+    ):
+        old_value = current.get(field, '')
+        if value and old_value and old_value != value:
+            logging.warning(
+                '%s de %s-%s mudou de %s para %s',
+                field,
+                collection,
+                key,
+                old_value,
+                value,
+            )
+        if value:
+            current[field] = value
+
+
+def add_info_to_article_codes_from_opac(data, article_codes):
+    for _, pids in data.items():
+        for pid, values in pids.items():
+            collection = _normalize_article_code_collection(values.get('collection', 'scl'))
+            pid_v2 = values.get('pid_v2') or values.get('pid') or ''
+            pid_v3 = values.get('pid_v3') or pid
+            doi = _extract_doi_from_values(values)
+
+            _merge_article_code(article_codes, collection, pid_v3 or pid_v2, pid_v2, pid_v3, doi)
+
+
+def add_info_to_article_codes_from_preprints(data, article_codes):
+    for collection, pids in data.items():
+        for pid, values in pids.items():
+            doi = _extract_doi_from_values(values)
+            _merge_article_code(article_codes, collection, pid, '', pid, doi)
+
+
+def add_info_to_article_codes_from_articlemeta(data, article_codes):
+    for collection, pids in data.items():
+        for pid, values in pids.items():
+            doi = _extract_doi_from_values(values)
+            _merge_article_code(article_codes, collection, pid, pid, values.get('pid_v3', ''), doi)
+
+
 def _update_pid_issn(current_dict, collection, pid, issn):
     if pid not in current_dict[collection]:
         current_dict[collection][pid] = []
