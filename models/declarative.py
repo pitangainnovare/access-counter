@@ -134,6 +134,22 @@ class Article(Base):
     journal = relationship(Journal)
 
 
+class ArticleCode(Base):
+    __tablename__ = 'counter_article_code'
+    __table_args__ = (
+        Index('idx_col_pid_v2_cac', 'collection', 'pid_v2'),
+        Index('idx_col_pid_v3_cac', 'collection', 'pid_v3'),
+    )
+
+    id = Column(INTEGER(unsigned=True), ForeignKey('counter_article.id', name='idarticle_cac'), primary_key=True, autoincrement=False)
+    collection = Column(VARCHAR(3))
+    pid_v2 = Column(VARCHAR(23))
+    pid_v3 = Column(VARCHAR(23))
+    doi = Column(VARCHAR(255))
+
+    article = relationship(Article)
+
+
 class ArticleMetric(Base):
     __tablename__ = 'counter_article_metric'
     __table_args__ = (UniqueConstraint('year_month_day', 'idarticle', 'idformat', 'idlanguage', 'idlocalization', name='uni_date_art_all'),)
