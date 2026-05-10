@@ -11,6 +11,7 @@ def generate_file_path(directory, name, version, extension):
 
 def load_dictionaries(directory, version):
     dictionaries = {
+        'article-codes': {},
         'pid-dates': {},
         'issn-acronym': {},
         'pdf-pid': {},
@@ -44,8 +45,10 @@ def load_data_from_opac_files(files):
     for f in sorted(files):
         with open(f) as fin:
             fj = json.load(fin)
+            collection = fj.get('collection', 'nbr')
 
             for pid, values in fj.get('documents', {}).items():
+                values['collection'] = values.get('collection') or collection
                 opac_data['nbr'][pid] = values
 
     return opac_data
