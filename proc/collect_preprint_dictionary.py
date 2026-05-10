@@ -83,7 +83,7 @@ def main():
         'from': params.from_date
     })
 
-    logging.info('Obtendo dados do OAI-PMH Preprints para (%s,%s)' % (params.from_date, params.until_date))
+    logging.info('Obtendo dados do OAI-PMH Preprints para (%s,%s)' % (params.from_date))
     data = {}
     for r in records:
         data.update(parse(r))
