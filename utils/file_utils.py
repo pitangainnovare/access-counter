@@ -57,7 +57,8 @@ def _load_json(filepath):
     try:
         content = _read_json_text(filepath)
     except UnicodeDecodeError as exc:
-        raise ValueError(f'Não foi possível decodificar JSON {filepath}') from exc
+        logging.warning('Ignorando arquivo JSON com encoding inválido: %s (%s)', filepath, exc)
+        return
 
     if not content.strip():
         logging.warning('Ignorando arquivo JSON vazio: %s', filepath)
@@ -66,7 +67,8 @@ def _load_json(filepath):
     try:
         return json.loads(content)
     except json.JSONDecodeError as exc:
-        raise ValueError(f'Não foi possível carregar JSON {filepath}') from exc
+        logging.warning('Ignorando arquivo JSON inválido: %s (%s)', filepath, exc)
+        return
 
 
 def load_data_from_opac_files(files):
