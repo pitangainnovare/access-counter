@@ -72,18 +72,21 @@ def main():
 
     logging.info('Carregando dados de OPAC')
     opac_data = file_utils.load_data_from_opac_files(file_utils.discover_files(DIR_DICTIONARIES, OPAC_DICTIONARY_PREFIX))
+    dict_utils.add_info_to_article_codes_from_opac(opac_data, current_dicts['article-codes'])
     dict_utils.add_info_to_dates_dict(opac_data, current_dicts['pid-dates'])
     dict_utils.add_info_to_pid_format_lang(opac_data, current_dicts['pid-format-lang'])
     del opac_data
 
     logging.info('Carregando dados de Preprints')
     preprint_data = file_utils.load_data_from_preprint_files(file_utils.discover_files(DIR_DICTIONARIES, PREPRINT_DICTIONARY_PREFIX))
+    dict_utils.add_info_to_article_codes_from_preprints(preprint_data, current_dicts['article-codes'])
     dict_utils.add_info_to_dates_dict(preprint_data, current_dicts['pid-dates'])
     dict_utils.add_info_to_pid_format_lang(preprint_data, current_dicts['pid-format-lang'])
     del preprint_data
 
     logging.info('Carregando dados de Articlemeta')
     am_data = file_utils.load_data_from_articlemeta_files(file_utils.discover_files(DIR_DICTIONARIES, ARTICLEMETA_PREFIX_PREFIX))
+    dict_utils.add_info_to_article_codes_from_articlemeta(am_data, current_dicts['article-codes'])
     dict_utils.update_dicts_with_am_counter_dict(current_dicts, am_data)
     del am_data
 
@@ -91,6 +94,7 @@ def main():
     dict_validator.clean(current_dicts)
 
     for d_name in [
+        'article-codes',
         'pid-issn', 
         'pid-format-lang',
         'pdf-pid',
