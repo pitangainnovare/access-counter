@@ -131,6 +131,27 @@ def _merge_existing_with_new(existing, row):
     return merged, changed_fields
 
 
+def _merge_pending_row(pending, row):
+    changed_fields = []
+    conflict_fields = []
+
+    for field in ('collection', 'pid_v2', 'pid_v3', 'doi'):
+        new_value = row.get(field) or ''
+        old_value = pending.get(field) or ''
+
+        if not new_value or old_value == new_value:
+            continue
+
+        if old_value:
+            conflict_fields.append(field)
+            continue
+
+        pending[field] = new_value
+        changed_fields.append(field)
+
+    return changed_fields, conflict_fields
+
+
 def _chunk_rows(rows, chunk_size):
     for index in range(0, len(rows), chunk_size):
         yield rows[index:index + chunk_size]
@@ -155,8 +176,8 @@ def _detect_snapshot_conflicts(rows):
 
 def _prepare_rows(article_codes, article_map, existing, duplicate_ids):
     stats = Counter()
-    rows_to_insert = []
-    rows_to_update = []
+    rows_to_insert_by_id = {}
+    rows_to_update_by_id = {}
     rows_for_conflict_check = []
 
     for row in _iter_article_code_rows(article_codes):
@@ -176,31 +197,58 @@ def _prepare_rows(article_codes, article_map, existing, duplicate_ids):
 
         existing_row = existing.get(article_id)
         if not existing_row:
-            rows_to_insert.append(row)
-            stats['inserts'] += 1
+            pending_row = rows_to_insert_by_id.get(article_id)
+            if pending_row:
+                stats['duplicate_snapshot_ids'] += 1
+                _, conflict_fields = _merge_pending_row(pending_row, row)
+                for field in conflict_fields:
+                    stats[f'duplicate_snapshot_id_conflicts_{field}'] += 1
+            else:
+                rows_to_insert_by_id[article_id] = row
             continue
 
         merged, changed_fields = _merge_existing_with_new(existing_row, row)
         if changed_fields:
-            rows_to_update.append(merged)
-            stats['updates'] += 1
+            pending_row = rows_to_update_by_id.get(article_id)
+            if pending_row:
+                stats['duplicate_snapshot_ids'] += 1
+                _, conflict_fields = _merge_pending_row(pending_row, merged)
+                for field in conflict_fields:
+                    stats[f'duplicate_snapshot_id_conflicts_{field}'] += 1
+            else:
+                rows_to_update_by_id[article_id] = merged
         else:
             stats['unchanged'] += 1
 
     for field, count in _detect_snapshot_conflicts(rows_for_conflict_check).items():
         stats[f'conflicts_{field}'] = count
 
+    rows_to_insert = list(rows_to_insert_by_id.values())
+    rows_to_update = list(rows_to_update_by_id.values())
+    stats['inserts'] = len(rows_to_insert)
+    stats['updates'] = len(rows_to_update)
+
     return rows_to_insert, rows_to_update, stats
 
 
 def _apply_changes(session, rows_to_insert, rows_to_update, batch_size):
     for chunk in _chunk_rows(rows_to_insert, batch_size):
-        session.bulk_insert_mappings(ArticleCode, chunk)
-        session.commit()
+        try:
+            session.bulk_insert_mappings(ArticleCode, chunk)
+            session.commit()
+        except SQLAlchemyError:
+            session.rollback()
+            logging.exception('Erro ao inserir lote com %s registros em counter_article_code', len(chunk))
+            raise
 
     for chunk in _chunk_rows(rows_to_update, batch_size):
-        session.bulk_update_mappings(ArticleCode, chunk)
-        session.commit()
+        try:
+            session.bulk_update_mappings(ArticleCode, chunk)
+            session.commit()
+        except SQLAlchemyError:
+            session.rollback()
+            logging.exception('Erro ao atualizar lote com %s registros em counter_article_code', len(chunk))
+            raise
 
 
 def _log_collection_totals(rows):
@@ -286,7 +334,7 @@ def main():
             else:
                 _apply_changes(session, rows_to_insert, rows_to_update, params.batch_size)
     except SQLAlchemyError:
-        logging.error('Erro de banco ao sincronizar counter_article_code. Verifique STR_CONNECTION e permissões.')
+        logging.exception('Erro de banco ao sincronizar counter_article_code. Verifique STR_CONNECTION e permissões.')
         return
 
     for key in sorted(stats):
