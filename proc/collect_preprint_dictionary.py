@@ -43,10 +43,6 @@ def _extract_doi(identifiers):
             return doi
 
 
-def _generate_filename(prefix, from_date, until_date):
-    return f'{prefix}-{from_date}-{until_date}.json'
-
-
 def parse(record):
     preprint_pid = re.match(REGEX_PREPRINT_PID_PREFIX, record.header.identifier).group(1)
 
@@ -94,5 +90,5 @@ def main():
     for r in records:
         data.update(parse(r))
 
-    filename = _generate_filename(PREPRINT_DICTIONARY_PREFIX, params.from_date, params.until_date)
+    filename = f'{PREPRINT_DICTIONARY_PREFIX}-{params.from_date}.json'
     save(data, filename)
