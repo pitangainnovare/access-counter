@@ -71,7 +71,6 @@ def save(data, filename):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('-f', '--from_date', required=True)
-    parser.add_argument('-u', '--until_date', default=datetime.now().strftime('%Y-%m-%d'))
     params = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO,
@@ -81,8 +80,7 @@ def main():
     oai_client = Sickle(endpoint=OAI_PMH_PREPRINT_ENDPOINT, max_retries=3, verify=False)
     records = oai_client.ListRecords(**{
         'metadataPrefix': OAI_METADATA_PREFIX,
-        'from': params.from_date,
-        'until': params.until_date,
+        'from': params.from_date
     })
 
     logging.info('Obtendo dados do OAI-PMH Preprints para (%s,%s)' % (params.from_date, params.until_date))
