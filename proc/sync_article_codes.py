@@ -72,9 +72,17 @@ def _resolve_article_id(row, article_map):
                 return article_id
 
 
+def _code_pair(row):
+    return (
+        row.get('collection') or '',
+        row.get('pid_v2') or '',
+        row.get('pid_v3') or '',
+    )
+
+
 def _build_existing_code_maps(session, table_exists):
     if not table_exists:
-        return {}, set()
+        return {}, set(), {}
 
     duplicate_ids = {
         row.id
@@ -86,6 +94,7 @@ def _build_existing_code_maps(session, table_exists):
     }
 
     existing = {}
+    existing_code_pairs = {}
     rows = session.query(
         ArticleCode.id,
         ArticleCode.collection,
@@ -103,7 +112,9 @@ def _build_existing_code_maps(session, table_exists):
                 'doi': row.doi or '',
             }
 
-    return existing, duplicate_ids
+        existing_code_pairs[_code_pair(existing[row.id])] = row.id
+
+    return existing, duplicate_ids, existing_code_pairs
 
 
 def _merge_existing_with_new(existing, row):
@@ -152,6 +163,46 @@ def _merge_pending_row(pending, row):
     return changed_fields, conflict_fields
 
 
+def _filter_conflicting_code_pairs(rows, existing_code_pairs, seen_code_pairs, stats):
+    filtered_rows = []
+
+    for row in rows:
+        code_pair = _code_pair(row)
+        article_id = row['id']
+
+        existing_article_id = existing_code_pairs.get(code_pair)
+        if existing_article_id and existing_article_id != article_id:
+            stats['duplicate_existing_code_pairs'] += 1
+            continue
+
+        seen_article_id = seen_code_pairs.get(code_pair)
+        if seen_article_id and seen_article_id != article_id:
+            stats['duplicate_snapshot_code_pairs'] += 1
+            continue
+
+        seen_code_pairs[code_pair] = article_id
+        filtered_rows.append(row)
+
+    return filtered_rows
+
+
+def _filter_rows_with_unique_code_pairs(rows_to_insert, rows_to_update, existing_code_pairs, stats):
+    seen_code_pairs = {}
+    rows_to_insert = _filter_conflicting_code_pairs(
+        rows_to_insert,
+        existing_code_pairs,
+        seen_code_pairs,
+        stats,
+    )
+    rows_to_update = _filter_conflicting_code_pairs(
+        rows_to_update,
+        existing_code_pairs,
+        seen_code_pairs,
+        stats,
+    )
+    return rows_to_insert, rows_to_update
+
+
 def _chunk_rows(rows, chunk_size):
     for index in range(0, len(rows), chunk_size):
         yield rows[index:index + chunk_size]
@@ -174,7 +225,7 @@ def _detect_snapshot_conflicts(rows):
     return conflicts
 
 
-def _prepare_rows(article_codes, article_map, existing, duplicate_ids):
+def _prepare_rows(article_codes, article_map, existing, duplicate_ids, existing_code_pairs):
     stats = Counter()
     rows_to_insert_by_id = {}
     rows_to_update_by_id = {}
@@ -225,6 +276,12 @@ def _prepare_rows(article_codes, article_map, existing, duplicate_ids):
 
     rows_to_insert = list(rows_to_insert_by_id.values())
     rows_to_update = list(rows_to_update_by_id.values())
+    rows_to_insert, rows_to_update = _filter_rows_with_unique_code_pairs(
+        rows_to_insert,
+        rows_to_update,
+        existing_code_pairs,
+        stats,
+    )
     stats['inserts'] = len(rows_to_insert)
     stats['updates'] = len(rows_to_update)
 
@@ -321,12 +378,13 @@ def main():
         session_factory = sessionmaker(bind=engine)
         with session_factory() as session:
             article_map = _build_article_map(session)
-            existing, duplicate_ids = _build_existing_code_maps(session, table_exists)
+            existing, duplicate_ids, existing_code_pairs = _build_existing_code_maps(session, table_exists)
             rows_to_insert, rows_to_update, stats = _prepare_rows(
                 article_codes,
                 article_map,
                 existing,
                 duplicate_ids,
+                existing_code_pairs,
             )
 
             if params.dry_run:
