@@ -54,6 +54,7 @@ setup(
     collect_opac_dictionary=proc.collect_opac_dictionary:main
     collect_preprint_dictionary=proc.collect_preprint_dictionary:main
     collect_articlemeta_dictionary=proc.collect_articlemeta_dictionary:main
+    sync_article_codes=proc.sync_article_codes:main
     aggregate=proc.aggregate:main
     revert_date_status_for_pending_aggr=proc.revert_date_status_for_pending_aggr:main
     recover_date_status_to_pretable=proc.recover_date_status_to_pretable:main
