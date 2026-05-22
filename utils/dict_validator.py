@@ -194,10 +194,12 @@ def clean_issn_acronym(data):
 
 
 def _standardize_langcode(language):
-    if langcodes.tag_is_valid(language):
-        return langcodes.standardize_tag(language)
+    try:
+        if langcodes.tag_is_valid(language):
+            return langcodes.standardize_tag(language)
+    except AttributeError as e:
+        logging.error(f"Erro ao padronizar {language}: {e}")
 
-    logging.warning(f'Tentando padronizar {language}')
     try:
         inferred_lang, score = langcodes.best_match(language, langcodes.LANGUAGE_ALPHA3.keys())
     except langcodes.tag_parser.LanguageTagError:
